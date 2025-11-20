@@ -1,0 +1,429 @@
+###############################################################################
+# Microservices Platform API Tests
+#
+# Use with REST Client extension in VS Code
+# Install: https://marketplace.visualstudio.com/items?itemName=humao.rest-client
+###############################################################################
+
+### Variables
+@baseUrl = http://localhost
+@userServiceUrl = http://localhost:8001
+@productServiceUrl = http://localhost:8002
+@orderServiceUrl = http://localhost:8003
+@paymentServiceUrl = http://localhost:8004
+@notificationServiceUrl = http://localhost:8005
+@inventoryServiceUrl = http://localhost:8006
+
+# Store tokens and IDs for reuse
+@accessToken =
+@userId =
+@productId =
+@orderId =
+
+
+###############################################################################
+# GATEWAY - Health Checks
+###############################################################################
+
+### Gateway Health Check
+GET {{baseUrl}}/health
+Accept: application/json
+
+### Gateway Metrics
+GET {{baseUrl}}/metrics
+
+
+###############################################################################
+# USER SERVICE (Port 8001)
+###############################################################################
+
+### User Service - Health Check
+GET {{userServiceUrl}}/health
+
+### User Service - Register New User (Create User)
+# @name registerUser
+POST {{userServiceUrl}}/api/v1/users
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "Password123",
+  "full_name": "Test User"
+}
+
+### User Service - Login
+# @name loginUser
+POST {{userServiceUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "Password123"
+}
+
+### Extract access token from login response
+@accessToken = {{loginUser.response.body.access_token}}
+
+### User Service - Get Current User Profile (Requires Auth)
+GET {{userServiceUrl}}/auth/me
+Authorization: Bearer {{accessToken}}
+
+{{userId}} = 1  # Replace with actual user ID
+### User Service - Get User by ID
+GET {{userServiceUrl}}/api/v1/users/{{userId}}
+
+### User Service - Update User Profile (by ID)
+# Note: You need the actual user UUID, not "me"
+# Get your user_id from the /auth/me endpoint first
+# Replace {user_id} with the actual user ID
+PUT {{userServiceUrl}}/api/v1/users/{user_id}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "full_name": "Shaan",
+  "bio": "This is my bio"
+}
+
+### User Service - List All Users
+GET {{userServiceUrl}}/api/v1/users?skip=0&limit=10
+Authorization: Bearer {{accessToken}}
+
+### User Service - Get Current User (with auth)
+GET {{userServiceUrl}}/auth/me
+Authorization: Bearer {{accessToken}}
+
+### User Service - Refresh Token
+POST {{userServiceUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "your_refresh_token_here"
+}
+
+### User Service - Logout
+POST {{userServiceUrl}}/auth/logout
+Authorization: Bearer {{accessToken}}
+
+
+###############################################################################
+# PRODUCT SERVICE (Port 8002)
+###############################################################################
+
+### Product Service - Health Check
+GET {{productServiceUrl}}/health
+
+### Product Service - Create Product
+# @name createProduct
+POST {{productServiceUrl}}/api/v1/products
+Content-Type: application/json
+
+{
+  "name": "Test Product",
+  "description": "This is a test product",
+  "price": 29.99,
+  "category": "Electronics",
+  "stock": 100,
+  "sku": "TEST-003",
+  "images": ["https://example.com/image.jpg"]
+}
+
+### Extract product ID
+@productId = {{createProduct.response.body._id}}
+
+### Product Service - Get All Products
+GET {{productServiceUrl}}/api/v1/products?skip=0&limit=10
+
+### Product Service - Get Product by ID
+GET {{productServiceUrl}}/api/v1/products/{{productId}}
+# replace {{productId}} with actual product ID from createProduct response
+
+### Product Service - Update Product
+PUT {{productServiceUrl}}/api/v1/products/{{productId}}
+Content-Type: application/json
+
+{
+  "name": "Updated Product Name",
+  "price": 39.99,
+  "stock": 150
+}
+
+Available Product Service Endpoints:
+
+### 1. List All Products (with optional search)
+GET http://localhost:8002/api/v1/products?search=test&skip=0&limit=10
+### 2. Get Featured Products
+GET http://localhost:8002/api/v1/products/featured
+### 3. Get Products by Category
+GET http://localhost:8002/api/v1/products/category/Electronics
+### 4. Search by Tags
+GET http://localhost:8002/api/v1/products/search/tags?tags=laptop&tags=gaming
+### 5. Get Product by ID
+GET http://localhost:8002/api/v1/products/{product_id}
+### 6. Get Product by SKU
+GET http://localhost:8002/api/v1/products/sku/TEST-001
+
+### Product Service - Get Products by Category
+GET {{productServiceUrl}}/api/v1/products/category/Electronics
+
+### Product Service - Delete Product
+DELETE {{productServiceUrl}}/api/v1/products/{{productId}}
+
+### Product Service - Check Stock
+PATCH {{productServiceUrl}}/api/v1/products/{{productId}}/stock
+
+
+###############################################################################
+# ORDER SERVICE (Port 8003)
+###############################################################################
+
+### Order Service - Health Check
+GET {{orderServiceUrl}}/health
+
+### Order Service - Create Order
+# @name createOrder
+POST {{orderServiceUrl}}/api/v1/orders
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "user_id": "user123",
+  "items": [
+    {
+      "product_id": "{{productId}}",
+      "quantity": 2,
+      "price": 29.99
+    }
+  ],
+  "shipping_address": {
+    "street": "123 Main St",
+    "city": "New York",
+    "state": "NY",
+    "zip_code": "10001",
+    "country": "USA"
+  }
+}
+
+### Extract order ID
+@orderId = {{createOrder.response.body._id}}
+
+### Order Service - Get Order by ID
+GET {{orderServiceUrl}}/api/v1/orders/{{orderId}}
+Authorization: Bearer {{accessToken}}
+
+### Order Service - Get User Orders
+GET {{orderServiceUrl}}/api/v1/orders?user_id=user123
+Authorization: Bearer {{accessToken}}
+
+### Order Service - Update Order Status
+PATCH {{orderServiceUrl}}/api/v1/orders/{{orderId}}/status
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "status": "confirmed"
+}
+
+### Order Service - Cancel Order
+POST {{orderServiceUrl}}/api/v1/orders/{{orderId}}/cancel
+Authorization: Bearer {{accessToken}}
+
+
+###############################################################################
+# PAYMENT SERVICE (Port 8004)
+###############################################################################
+
+### Payment Service - Health Check
+GET {{paymentServiceUrl}}/health
+
+### Payment Service - Metrics
+GET {{paymentServiceUrl}}/metrics
+
+### Payment Service - Create Payment
+# @name createPayment
+POST {{paymentServiceUrl}}/api/v1/payments
+Content-Type: application/json
+
+{
+  "order_id": "{{orderId}}",
+  "amount": 59.98,
+  "currency": "usd",
+  "payment_method": {
+    "type": "card",
+    "card_number": "4242424242424242",
+    "exp_month": 12,
+    "exp_year": 2026,
+    "cvv": "123"
+  },
+  "description": "Test payment for order"
+}
+
+### Extract payment ID
+@paymentId = {{createPayment.response.body.id}}
+
+### Payment Service - Get Payment by ID
+GET {{paymentServiceUrl}}/api/v1/payments/{{paymentId}}
+
+### Payment Service - Process Payment
+POST {{paymentServiceUrl}}/api/v1/payments/{{paymentId}}/process
+
+### Payment Service - Refund Payment
+POST {{paymentServiceUrl}}/api/v1/payments/{{paymentId}}/refund
+Content-Type: application/json
+
+{
+  "payment_id": "{{paymentId}}",
+  "amount": 59.98,
+  "reason": "Customer request"
+}
+
+
+###############################################################################
+# NOTIFICATION SERVICE (Port 8005)
+###############################################################################
+
+### Notification Service - Health Check
+GET {{notificationServiceUrl}}/health
+
+### Notification Service - Metrics
+GET {{notificationServiceUrl}}/metrics
+
+### Notification Service - Send Email
+POST {{notificationServiceUrl}}/api/v1/notifications/email
+Content-Type: application/json
+
+{
+  "recipient": {
+    "email": "sarthok.ali0427@gmail.com",
+    "name": "Test User"
+  },
+  "subject": "Test Email",
+  "body": "This is a test email from the notification service"
+}
+
+### Notification Service - Send SMS
+# POST {{notificationServiceUrl}}/api/v1/notifications/sms
+# Content-Type: application/json
+
+# {
+#   "recipient": {
+#     "phone": "+1234567890",
+#     "name": "Test User"
+#   },
+#   "body": "This is a test SMS"
+# }
+
+# ### Notification Service - Get Notification Status
+# GET {{notificationServiceUrl}}/api/v1/notifications/notification123
+
+
+# ###############################################################################
+# # INVENTORY SERVICE (Port 8006)
+# ###############################################################################
+
+### Inventory Service - Health Check
+GET {{inventoryServiceUrl}}/health
+
+### Inventory Service - Metrics
+GET {{inventoryServiceUrl}}/metrics
+
+### Inventory Service - Get Inventory
+GET {{inventoryServiceUrl}}/api/v1/inventory/product/{{productId}}
+
+### Inventory Service - Check Stock
+GET {{inventoryServiceUrl}}/api/v1/inventory/product/{{productId}}/check?quantity=10
+
+### Inventory Service - Reserve Stock
+POST {{inventoryServiceUrl}}/api/v1/inventory/reserve
+Content-Type: application/json
+
+{
+  "product_id": "{{productId}}",
+  "quantity": 5,
+  "order_id": "{{orderId}}"
+}
+
+### Inventory Service - Release Stock
+POST {{inventoryServiceUrl}}/api/v1/inventory/release
+Content-Type: application/json
+
+{
+  "product_id": "{{productId}}",
+  "quantity": 5,
+  "order_id": "{{orderId}}"
+}
+
+### Inventory Service - Restock
+POST {{inventoryServiceUrl}}/api/v1/inventory/restock
+Content-Type: application/json
+
+{
+  "product_id": "{{productId}}",
+  "quantity": 100,
+  "warehouse_id": "main"
+}
+
+
+###############################################################################
+# MONITORING & OBSERVABILITY
+###############################################################################
+
+### Prometheus - Query Metrics
+GET http://localhost:9090/api/v1/query?query=up
+
+### Grafana - Health Check
+GET http://localhost:3000/api/health
+
+### Jaeger - Health Check
+GET http://localhost:14269/
+
+### Kafka UI
+GET http://localhost:8080
+
+
+###############################################################################
+# LOAD TESTING SCENARIOS
+###############################################################################
+
+### Scenario 1: Complete User Journey
+# 1. Register user
+# 2. Login
+# 3. Browse products
+# 4. Create order
+# 5. Process payment
+
+### Scenario 2: High Traffic Product Browse
+# Simulate multiple concurrent product requests
+GET {{productServiceUrl}}/api/v1/products?skip=0&limit=10
+###
+GET {{productServiceUrl}}/api/v1/products?skip=10&limit=10
+###
+GET {{productServiceUrl}}/api/v1/products?skip=20&limit=10
+
+
+###############################################################################
+# ERROR SCENARIOS (For Testing Error Handling)
+###############################################################################
+
+### Invalid Login Credentials
+POST {{userServiceUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "invalid@example.com",
+  "password": "wrongpassword"
+}
+
+### Request without Authentication (Should fail with 401)
+GET {{userServiceUrl}}/auth/me
+
+### Invalid Product ID
+GET {{productServiceUrl}}/api/v1/products/invalid-id
+
+### Create Order with Invalid Data
+POST {{orderServiceUrl}}/api/v1/orders
+Content-Type: application/json
+
+{
+  "invalid_field": "test"
+}

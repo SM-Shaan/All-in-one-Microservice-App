@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../../../../../E-commerce-Microservices-with-Kafka"
+		},
+		{
+			"path": "../../../../../mini-shop-demo"
+		},
+		{
+			"path": "../../../.."
+		}
+	],
+	"settings": {}
+}

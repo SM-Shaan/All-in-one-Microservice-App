@@ -1,0 +1,313 @@
+# CD Pipeline - Continuous Deployment
+# =====================================
+# Deploys to staging/production on successful CI
+# Builds and pushes Docker images to registry
+
+name: CD - Continuous Deployment
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository_owner }}
+
+jobs:
+  # ==========================================================================
+  # Build and Push Docker Images
+  # ==========================================================================
+  build-and-push:
+    name: Build & Push - ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        service:
+          - user-service
+          - product-service
+          - order-service
+          - payment-service
+          - notification-service
+          - inventory-service
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./services/${{ matrix.service }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+  # ==========================================================================
+  # Deploy to Staging
+  # ==========================================================================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'staging'
+    environment:
+      name: staging
+      url: https://staging.example.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBECONFIG_STAGING }}" > kubeconfig
+          export KUBECONFIG=./kubeconfig
+
+      - name: Deploy to Kubernetes
+        run: |
+          # Update image tags in kubernetes manifests
+          kubectl set image deployment/user-service \
+            user-service=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/user-service:${{ github.sha }} \
+            -n staging
+
+          kubectl set image deployment/product-service \
+            product-service=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/product-service:${{ github.sha }} \
+            -n staging
+
+          kubectl set image deployment/order-service \
+            order-service=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/order-service:${{ github.sha }} \
+            -n staging
+
+          kubectl set image deployment/payment-service \
+            payment-service=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/payment-service:${{ github.sha }} \
+            -n staging
+
+          kubectl set image deployment/notification-service \
+            notification-service=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/notification-service:${{ github.sha }} \
+            -n staging
+
+          kubectl set image deployment/inventory-service \
+            inventory-service=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/inventory-service:${{ github.sha }} \
+            -n staging
+
+      - name: Wait for deployment
+        run: |
+          kubectl rollout status deployment/user-service -n staging --timeout=5m
+          kubectl rollout status deployment/product-service -n staging --timeout=5m
+          kubectl rollout status deployment/order-service -n staging --timeout=5m
+          kubectl rollout status deployment/payment-service -n staging --timeout=5m
+          kubectl rollout status deployment/notification-service -n staging --timeout=5m
+          kubectl rollout status deployment/inventory-service -n staging --timeout=5m
+
+      - name: Run smoke tests
+        run: |
+          # Basic health checks
+          curl -f https://staging.example.com/health || exit 1
+          curl -f https://staging.example.com/api/users/health || exit 1
+          curl -f https://staging.example.com/api/products/health || exit 1
+
+  # ==========================================================================
+  # Deploy to Production
+  # ==========================================================================
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build-and-push, deploy-staging]
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.environment == 'production'
+    environment:
+      name: production
+      url: https://example.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBECONFIG_PRODUCTION }}" > kubeconfig
+          export KUBECONFIG=./kubeconfig
+
+      - name: Create deployment backup
+        run: |
+          kubectl get all -n production > backup-$(date +%Y%m%d-%H%M%S).yaml
+
+      - name: Deploy with Blue-Green strategy
+        run: |
+          # Deploy new version to green environment
+          kubectl apply -f k8s/production/green/ -n production
+
+          # Wait for green to be ready
+          kubectl wait --for=condition=available --timeout=600s \
+            deployment -l version=green -n production
+
+          # Run validation tests
+          ./scripts/validate-deployment.sh green
+
+          # Switch traffic to green
+          kubectl patch service api-gateway -n production \
+            -p '{"spec":{"selector":{"version":"green"}}}'
+
+          # Wait and monitor
+          sleep 60
+
+          # If successful, delete blue
+          kubectl delete deployment -l version=blue -n production
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          # Switch back to blue
+          kubectl patch service api-gateway -n production \
+            -p '{"spec":{"selector":{"version":"blue"}}}'
+
+          # Delete failed green deployment
+          kubectl delete deployment -l version=green -n production
+
+      - name: Send notification
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Production deployment ${{ job.status }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+  # ==========================================================================
+  # Post-Deployment Tests
+  # ==========================================================================
+  post-deployment-tests:
+    name: Post-Deployment Tests
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pytest httpx
+
+      - name: Run smoke tests
+        env:
+          API_BASE_URL: https://example.com
+        run: |
+          pytest tests/smoke/ -v
+
+      - name: Run end-to-end tests
+        env:
+          API_BASE_URL: https://example.com
+        run: |
+          pytest tests/e2e/ -v --maxfail=1
+
+  # ==========================================================================
+  # Release Notes
+  # ==========================================================================
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: post-deployment-tests
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^)
+
+          # Generate changelog
+          git log $PREV_TAG..HEAD --pretty=format:"- %s (%an)" > CHANGELOG.md
+
+          echo "::set-output name=notes::$(cat CHANGELOG.md)"
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: ${{ steps.release_notes.outputs.notes }}
+          draft: false
+          prerelease: false
+
+  # ==========================================================================
+  # Deployment Summary
+  # ==========================================================================
+  deployment-summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [build-and-push, deploy-staging, deploy-production]
+    if: always()
+
+    steps:
+      - name: Summary
+        run: |
+          echo "🚀 Deployment Summary"
+          echo "===================="
+          echo "Build & Push: ${{ needs.build-and-push.result }}"
+          echo "Deploy Staging: ${{ needs.deploy-staging.result }}"
+          echo "Deploy Production: ${{ needs.deploy-production.result }}"
+          echo ""
+          echo "Environment URLs:"
+          echo "Staging: https://staging.example.com"
+          echo "Production: https://example.com"

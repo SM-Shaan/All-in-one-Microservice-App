@@ -1,0 +1,409 @@
+# CI Pipeline - Continuous Integration
+# ====================================
+# Runs on every push and pull request
+# Tests, lints, and validates all services
+
+name: CI - Continuous Integration
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ==========================================================================
+  # Detect Changes
+  # ==========================================================================
+  detect-changes:
+    name: Detect Changed Services
+    runs-on: ubuntu-latest
+    outputs:
+      user-service: ${{ steps.filter.outputs.user-service }}
+      product-service: ${{ steps.filter.outputs.product-service }}
+      order-service: ${{ steps.filter.outputs.order-service }}
+      payment-service: ${{ steps.filter.outputs.payment-service }}
+      notification-service: ${{ steps.filter.outputs.notification-service }}
+      inventory-service: ${{ steps.filter.outputs.inventory-service }}
+      shared: ${{ steps.filter.outputs.shared }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            user-service:
+              - 'services/user-service/**'
+              - 'shared/**'
+            product-service:
+              - 'services/product-service/**'
+              - 'shared/**'
+            order-service:
+              - 'services/order-service/**'
+              - 'shared/**'
+            payment-service:
+              - 'services/payment-service/**'
+              - 'shared/**'
+            notification-service:
+              - 'services/notification-service/**'
+              - 'shared/**'
+            inventory-service:
+              - 'services/inventory-service/**'
+              - 'shared/**'
+            shared:
+              - 'shared/**'
+
+  # ==========================================================================
+  # Code Quality Checks
+  # ==========================================================================
+  code-quality:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 black isort mypy
+
+      - name: Run Black (Code Formatting)
+        run: |
+          black --check services/ shared/
+        continue-on-error: true
+
+      - name: Run isort (Import Sorting)
+        run: |
+          isort --check-only services/ shared/
+        continue-on-error: true
+
+      - name: Run Flake8 (Linting)
+        run: |
+          flake8 services/ shared/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 services/ shared/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+  # ==========================================================================
+  # User Service Tests
+  # ==========================================================================
+  test-user-service:
+    name: Test User Service
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.user-service == 'true' || needs.detect-changes.outputs.shared == 'true'
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-user-service-${{ hashFiles('services/user-service/requirements.txt') }}
+
+      - name: Install dependencies
+        run: |
+          # Install shared module first
+          cd shared
+          pip install -r requirements.txt
+          pip install -e .
+          cd ../services/user-service
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov httpx
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/test_db
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          cd services/user-service
+          pytest tests/ -v --cov=app --cov-report=xml --cov-report=term
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./services/user-service/coverage.xml
+          flags: user-service
+
+  # ==========================================================================
+  # Product Service Tests
+  # ==========================================================================
+  test-product-service:
+    name: Test Product Service
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.product-service == 'true' || needs.detect-changes.outputs.shared == 'true'
+
+    services:
+      mongodb:
+        image: mongo:7.0
+        env:
+          MONGO_INITDB_ROOT_USERNAME: admin
+          MONGO_INITDB_ROOT_PASSWORD: admin123
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ping: 1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 27017:27017
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          # Install shared module first
+          cd shared
+          pip install -r requirements.txt
+          pip install -e .
+          cd ../services/product-service
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov httpx
+
+      - name: Run tests
+        env:
+          MONGODB_URL: mongodb://admin:admin123@localhost:27017
+          MONGODB_DB_NAME: test_products
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          cd services/product-service
+          pytest tests/ -v --cov=app --cov-report=xml --cov-report=term
+
+  # ==========================================================================
+  # Order Service Tests
+  # ==========================================================================
+  test-order-service:
+    name: Test Order Service
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.order-service == 'true' || needs.detect-changes.outputs.shared == 'true'
+
+    services:
+      mongodb:
+        image: mongo:7.0
+        env:
+          MONGO_INITDB_ROOT_USERNAME: admin
+          MONGO_INITDB_ROOT_PASSWORD: admin123
+        ports:
+          - 27017:27017
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          # Install shared module first
+          cd shared
+          pip install -r requirements.txt
+          pip install -e .
+          cd ../services/order-service
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov httpx
+
+      - name: Run tests
+        env:
+          MONGODB_URL: mongodb://admin:admin123@localhost:27017
+          MONGODB_DB_NAME: test_orders
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          cd services/order-service
+          pytest tests/ -v --cov=app --cov-report=xml
+
+  # ==========================================================================
+  # Payment Service Tests
+  # ==========================================================================
+  test-payment-service:
+    name: Test Payment Service
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.payment-service == 'true' || needs.detect-changes.outputs.shared == 'true'
+
+    services:
+      mongodb:
+        image: mongo:7.0
+        env:
+          MONGO_INITDB_ROOT_USERNAME: admin
+          MONGO_INITDB_ROOT_PASSWORD: admin123
+        ports:
+          - 27017:27017
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          # Install shared module first
+          cd shared
+          pip install -r requirements.txt
+          pip install -e .
+          cd ../services/payment-service
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov httpx
+
+      - name: Run tests
+        env:
+          MONGODB_URL: mongodb://admin:admin123@localhost:27017
+          MONGODB_DB_NAME: test_payments
+          STRIPE_API_KEY: sk_test_mock_key
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          cd services/payment-service
+          pytest tests/ -v --cov=app --cov-report=xml
+
+  # ==========================================================================
+  # Integration Tests
+  # ==========================================================================
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [test-user-service, test-product-service, test-order-service]
+    if: always()
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Start services with docker-compose
+        run: |
+          docker-compose -f docker-compose.test.yml up -d
+          sleep 60  # Wait for services to be ready
+
+      - name: Check service health
+        run: |
+          docker-compose -f docker-compose.test.yml ps
+
+      - name: Run integration tests
+        run: |
+          pip install pytest pytest-asyncio httpx
+          pytest tests/integration/ -v
+
+      - name: Stop services
+        if: always()
+        run: docker-compose -f docker-compose.test.yml down
+
+  # ==========================================================================
+  # Security Scanning
+  # ==========================================================================
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # ==========================================================================
+  # Build Check
+  # ==========================================================================
+  build-check:
+    name: Build Check (Docker Images)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [user-service, product-service, order-service, payment-service, notification-service, inventory-service]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./services/${{ matrix.service }}/Dockerfile
+          push: false
+          tags: ${{ matrix.service }}:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ==========================================================================
+  # Summary
+  # ==========================================================================
+  ci-summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [code-quality, test-user-service, test-product-service, test-order-service, test-payment-service, integration-tests, security-scan, build-check]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          echo "✅ CI Pipeline Complete"
+          echo "Code Quality: ${{ needs.code-quality.result }}"
+          echo "User Service Tests: ${{ needs.test-user-service.result }}"
+          echo "Product Service Tests: ${{ needs.test-product-service.result }}"
+          echo "Order Service Tests: ${{ needs.test-order-service.result }}"
+          echo "Payment Service Tests: ${{ needs.test-payment-service.result }}"
+          echo "Integration Tests: ${{ needs.integration-tests.result }}"
+          echo "Security Scan: ${{ needs.security-scan.result }}"
+          echo "Build Check: ${{ needs.build-check.result }}"

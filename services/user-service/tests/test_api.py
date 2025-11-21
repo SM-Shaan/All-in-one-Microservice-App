@@ -33,7 +33,7 @@ async def test_create_user():
         "password": "password123"
     }
 
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(app=app, base_url="http://test", follow_redirects=True) as client:
         response = await client.post("/api/v1/users", json=user_data)
 
     assert response.status_code == status.HTTP_201_CREATED
@@ -56,7 +56,7 @@ async def test_get_user():
         "password": "password123"
     }
 
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(app=app, base_url="http://test", follow_redirects=True) as client:
         create_response = await client.post("/api/v1/users", json=user_data)
         user_id = create_response.json()["id"]
 
@@ -79,7 +79,7 @@ async def test_duplicate_email():
         "password": "password123"
     }
 
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(app=app, base_url="http://test", follow_redirects=True) as client:
         # Create first user
         response1 = await client.post("/api/v1/users", json=user_data)
         assert response1.status_code == status.HTTP_201_CREATED
@@ -100,7 +100,7 @@ async def test_invalid_email():
         "password": "password123"
     }
 
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(app=app, base_url="http://test", follow_redirects=True) as client:
         response = await client.post("/api/v1/users", json=user_data)
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
@@ -111,7 +111,7 @@ async def test_user_list():
     """Test listing users with pagination"""
     from app.main import app
 
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(app=app, base_url="http://test", follow_redirects=True) as client:
         response = await client.get("/api/v1/users?page=1&page_size=10")
 
     assert response.status_code == status.HTTP_200_OK
@@ -127,7 +127,7 @@ async def test_metrics_endpoint():
     """Test that metrics endpoint is accessible"""
     from app.main import app
 
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(app=app, base_url="http://test", follow_redirects=True) as client:
         response = await client.get("/metrics")
 
     assert response.status_code == status.HTTP_200_OK

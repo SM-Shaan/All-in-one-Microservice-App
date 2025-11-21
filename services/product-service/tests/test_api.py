@@ -15,7 +15,7 @@ async def test_health_check():
     """Test health check endpoint"""
     from app.main import app
 
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(app=app, base_url="http://test", follow_redirects=True) as client:
         response = await client.get("/health")
 
     assert response.status_code == status.HTTP_200_OK
@@ -35,7 +35,7 @@ async def test_create_product():
         "category": "Electronics"
     }
 
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(app=app, base_url="http://test", follow_redirects=True) as client:
         response = await client.post("/api/v1/products", json=product_data)
 
     assert response.status_code == status.HTTP_201_CREATED
@@ -58,7 +58,7 @@ async def test_get_product():
         "stock": 100
     }
 
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(app=app, base_url="http://test", follow_redirects=True) as client:
         create_response = await client.post("/api/v1/products", json=product_data)
         product_id = create_response.json()["id"]
 
@@ -75,7 +75,7 @@ async def test_list_products():
     """Test listing products with pagination"""
     from app.main import app
 
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(app=app, base_url="http://test", follow_redirects=True) as client:
         response = await client.get("/api/v1/products?page=1&page_size=10")
 
     assert response.status_code == status.HTTP_200_OK
@@ -96,7 +96,7 @@ async def test_update_product():
         "stock": 10
     }
 
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(app=app, base_url="http://test", follow_redirects=True) as client:
         create_response = await client.post("/api/v1/products", json=product_data)
         product_id = create_response.json()["id"]
 
@@ -125,7 +125,7 @@ async def test_invalid_price():
         "stock": 5
     }
 
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(app=app, base_url="http://test", follow_redirects=True) as client:
         response = await client.post("/api/v1/products", json=product_data)
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
@@ -136,7 +136,7 @@ async def test_metrics_endpoint():
     """Test that metrics endpoint is accessible"""
     from app.main import app
 
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(app=app, base_url="http://test", follow_redirects=True) as client:
         response = await client.get("/metrics")
 
     assert response.status_code == status.HTTP_200_OK

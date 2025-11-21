@@ -21,6 +21,7 @@ from app.core.http_client import http_client
 from app.core.cache import init_cache, close_cache
 from app.events.kafka_producer import kafka_producer
 from app.api.routes import health, users, favorites, cache, auth
+from prometheus_client import make_asgi_app
 
 
 # Lifespan context manager for startup/shutdown events
@@ -128,6 +129,10 @@ app.include_router(auth.router, prefix="/auth", tags=["Authentication"])  # Phas
 app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
 app.include_router(favorites.router, prefix="/api/v1/users", tags=["Favorites"])
 app.include_router(cache.router, prefix="/api/v1/cache", tags=["Cache"])
+
+# Add Prometheus metrics endpoint
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
 
 
 @app.get("/")

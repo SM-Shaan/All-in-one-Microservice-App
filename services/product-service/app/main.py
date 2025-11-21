@@ -19,6 +19,7 @@ from app.core.config import settings
 from app.core.cache import init_cache, close_cache
 from app.db.mongodb import MongoDB
 from app.api.routes import health, products
+from prometheus_client import make_asgi_app
 
 
 # ============================================================================
@@ -127,6 +128,10 @@ app.add_middleware(
 
 app.include_router(health.router, tags=["Health"])
 app.include_router(products.router, prefix="/api/v1/products", tags=["Products"])
+
+# Add Prometheus metrics endpoint
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
 
 
 # ============================================================================

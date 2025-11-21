@@ -31,7 +31,7 @@ async def test_product_service_health():
 @pytest.mark.asyncio
 async def test_create_user_and_product():
     """Test creating user and product"""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(follow_redirects=True) as client:
         # Create user
         user_response = await client.post(
             f"{BASE_URL}:8001/api/v1/users",

@@ -20,3 +20,4 @@ pyyaml==6.0.1
 
 # HTTP Client
 httpx==0.25.1
+prometheus-client

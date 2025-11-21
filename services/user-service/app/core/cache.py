@@ -28,7 +28,6 @@ def get_cache_service() -> RedisCacheService:
 
     This is initialized in the FastAPI lifespan.
     """
-    global _cache_service
     if _cache_service is None:
         raise RuntimeError("Cache service not initialized")
     return _cache_service
@@ -60,8 +59,6 @@ async def close_cache():
 
     Called during application shutdown.
     """
-    global _cache_service
-
     if _cache_service:
         await _cache_service.disconnect()
         print("Redis connection closed")
